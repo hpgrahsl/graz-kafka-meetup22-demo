@@ -1,0 +1,125 @@
+
+DESCRIBE FUNCTION K4KENCRYPT;
+DESCRIBE FUNCTION K4KDECRYPT;
+
+SHOW TOPICS;
+
+SHOW FUNCTIONS;
+
+SET 'auto.offset.reset'='earliest';
+PRINT 'mongodb.demodb.fake_citizens';
+
+-- STEP 01:
+-- create base stream from raw data i.e. partially encrypted
+-- Debezium CDC records originating from a MongoDB collection
+-- RUN SCRIPT '/home/step_01.ksql';
+CREATE STREAM s_fake_citizens(
+    _ID VARCHAR,
+    PERSONAL STRUCT<FIRSTNAME VARCHAR, LASTNAME VARCHAR, AGE VARCHAR, EYECOLOR VARCHAR, GENDER VARCHAR, HEIGHT VARCHAR, WEIGHT VARCHAR>,
+    ISACTIVE BOOLEAN,
+    REGISTERED VARCHAR,
+    CONTACT VARCHAR,
+    KNOWNRESIDENCES ARRAY<VARCHAR>
+) WITH (kafka_topic='mongodb.demodb.fake_citizens',value_format='JSON',partitions=1,replicas=1);
+
+-- 'inspect the element-wise encrypted fields
+SELECT * FROM s_fake_citizens EMIT CHANGES LIMIT 1;
+
+-- 'decryption of ciphertext in projection field list'
+SELECT
+    CONCAT(PERSONAL->FIRSTNAME,' ',K4KDECRYPT(PERSONAL->LASTNAME,'')) AS FULLNAME,
+    K4KDECRYPT(PERSONAL->EYECOLOR,'') AS EYECOLOR
+FROM s_fake_citizens
+EMIT CHANGES LIMIT 5;
+
+-- 'decryption of ciphertext in WHERE clause filtering'
+SELECT
+    CONCAT(PERSONAL->FIRSTNAME,' ',K4KDECRYPT(PERSONAL->LASTNAME,'')) AS FULLNAME,
+    K4KDECRYPT(PERSONAL->EYECOLOR,'') AS EYECOLOR
+FROM s_fake_citizens
+WHERE K4KDECRYPT(PERSONAL->EYECOLOR,'') IN ('green','amber')
+EMIT CHANGES LIMIT 10;
+
+-- STEP 02:
+-- decryption in combination with TABLES and GROUP BY operations
+-- to calc age stats per eyecolor of active users
+-- where both fields (age + eyecolor) are encrypted in underlying stream
+-- RUN SCRIPT '/home/step_02.ksql';
+CREATE TABLE t_age_stats_active_users_eyecolor AS 
+SELECT 
+    K4KDECRYPT(PERSONAL->EYECOLOR,'') AS EYECOLOR,
+    COUNT(*) AS COUNT,
+    MIN(K4KDECRYPT(PERSONAL->AGE,0)) AS MIN_AGE,
+    MAX(K4KDECRYPT(PERSONAL->AGE,0)) AS MAX_AGE,
+    FLOOR(AVG(K4KDECRYPT(PERSONAL->AGE,0))) AS AVG_AGE
+FROM s_fake_citizens
+WHERE ISACTIVE
+GROUP BY K4KDECRYPT(PERSONAL->EYECOLOR,'')
+EMIT CHANGES;
+
+-- 'inspect result for selected table rows'
+SELECT * FROM t_age_stats_active_users_eyecolor WHERE eyecolor IN ('hazel','green');
+
+-- STEP 03:
+-- create derived stream and table by decrypting addresses in knownresidences field,
+-- flatten with explode, split address to extract its state part and finally
+-- do group by to count addresses per state
+-- RUN SCRIPT '/home/step_03.ksql';
+CREATE STREAM s_addresses AS
+SELECT 
+    SPLIT(
+        EXPLODE(
+            TRANSFORM(
+                KNOWNRESIDENCES,
+                e => K4KDECRYPT(e,'')
+            )
+        ),
+        ','
+    ) AS ADDRESS_PARTS
+FROM s_fake_citizens 
+EMIT CHANGES;
+
+CREATE TABLE t_address_count_per_state AS 
+SELECT 
+    TRIM(ADDRESS_PARTS[3]) AS STATE,
+    COUNT(*) AS CNT 
+FROM s_addresses
+GROUP BY TRIM(ADDRESS_PARTS[3]);
+
+-- 'query results for Texas'
+SELECT * FROM t_address_count_per_state WHERE STATE = 'Texas';
+
+
+-- STEP 04:
+-- Create a derived stream which itself contains 
+-- sensitive data that must be encrypted before 
+-- having it written into backing kafka topic.
+-- RUN SCRIPT '/home/step_04.ksql';
+CREATE STREAM s_fake_citizens_modified_enc AS 
+SELECT 
+    K4KENCRYPT(
+        CONCAT(
+            PERSONAL->FIRSTNAME,' ',K4KDECRYPT(PERSONAL->LASTNAME,'')
+        )
+    ) AS FULLNAME,
+    CASE 
+        WHEN CAST(K4KDECRYPT(PERSONAL->WEIGHT,0) AS double) / 
+            (K4KDECRYPT(PERSONAL->HEIGHT,0) * K4KDECRYPT(PERSONAL->HEIGHT,0) / 10000.0)
+                < 18.5 THEN 'underweight'
+        WHEN CAST(K4KDECRYPT(PERSONAL->WEIGHT,0) AS double) / 
+            (K4KDECRYPT(PERSONAL->HEIGHT,0) * K4KDECRYPT(PERSONAL->HEIGHT,0) / 10000.0)
+                >= 25.0 THEN 'overweight'
+        ELSE 'normal weight'
+    END AS BMI_CATEGORY,
+    K4KDECRYPT(PERSONAL->AGE,0) AS AGE,
+    K4KENCRYPT(
+        K4KDECRYPT(CONTACT,STRUCT(`email`:='',`phone`:=''))->`phone`
+    ) AS PHONE,
+    K4KENCRYPT(
+        TRANSFORM(KNOWNRESIDENCES,e => REPLACE(K4KDECRYPT(e,''),',',' |'))
+        ,array['']
+    ) AS ADDRESSES
+FROM s_fake_citizens
+EMIT CHANGES;
+
+SELECT * FROM s_fake_citizens_modified_enc EMIT CHANGES LIMIT 1;

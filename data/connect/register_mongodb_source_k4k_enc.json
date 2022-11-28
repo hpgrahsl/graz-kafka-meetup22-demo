@@ -1,0 +1,28 @@
+{
+    "name": "mongodb-source-k4k-enc-001",
+    "config": {
+        "connector.class": "io.debezium.connector.mongodb.MongoDbConnector",
+        "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "key.converter.schemas.enable":false,
+        "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+        "value.converter.schemas.enable":false,
+        "mongodb.hosts": "mongodb:27017", 
+        "mongodb.name": "mongodb",
+        "collection.include.list": "demodb.fake_citizens",
+        "transforms":"unwrap,cipher",
+        "transforms.unwrap.type":"io.debezium.connector.mongodb.transforms.ExtractNewDocumentState",
+        "transforms.unwrap.array.encoding":"array",
+        "transforms.unwrap.flatten.struct":false,
+        "transforms.unwrap.drop.tombstones": false,
+        "transforms.unwrap.delete.handling.mode": "drop",
+        "transforms.cipher.type": "com.github.hpgrahsl.kafka.connect.transforms.kryptonite.CipherField$Value",
+        "transforms.cipher.cipher_mode": "ENCRYPT",
+        "transforms.cipher.cipher_data_keys": "${file:/home/kafka/secrets/classified.properties:cipher_data_keys}",
+        "transforms.cipher.cipher_data_key_identifier": "keyA",
+        "transforms.cipher.field_config": "[{\"name\":\"personal\",\"fieldMode\":\"ELEMENT\"},{\"name\":\"personal.lastname\"},{\"name\":\"personal.age\"},{\"name\":\"personal.eyecolor\"},{\"name\":\"personal.height\"},{\"name\":\"personal.weight\"},{\"name\":\"contact\",\"fieldMode\":\"OBJECT\"},{\"name\":\"knownresidences\",\"fieldMode\":\"ELEMENT\"}]",
+        "transforms.cipher.predicate":"isTombstone",
+        "transforms.cipher.negate":true,
+        "predicates": "isTombstone",
+        "predicates.isTombstone.type": "org.apache.kafka.connect.transforms.predicates.RecordIsTombstone"
+    }
+}

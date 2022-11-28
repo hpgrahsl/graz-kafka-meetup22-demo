@@ -1,0 +1,46 @@
+SET 'auto.offset.reset'='earliest';
+
+-- STEP 04:
+-- Create a derived stream which itself contains 
+-- sensitive data (FULLNAME,PHONE,ADDRESSES) that must be encrypted before 
+-- written to backing kafka topic.
+-- RUN SCRIPT '/home/step_04.ksql';
+CREATE STREAM s_fake_citizens_modified_enc AS 
+SELECT 
+    K4KENCRYPT(
+        CONCAT(
+            PERSONAL->FIRSTNAME,
+            ' ',
+            K4KDECRYPT(PERSONAL->LASTNAME,'')
+        )
+    ) AS FULLNAME,
+    CASE 
+        WHEN CAST(K4KDECRYPT(PERSONAL->WEIGHT,0) AS double) / 
+            (
+                K4KDECRYPT(PERSONAL->HEIGHT,0)
+                *
+                K4KDECRYPT(PERSONAL->HEIGHT,0)
+                / 10000.0
+            ) < 18.5 THEN 'underweight'
+        WHEN CAST(K4KDECRYPT(PERSONAL->WEIGHT,0) AS double) / 
+            (
+                K4KDECRYPT(PERSONAL->HEIGHT,0)
+                *
+                K4KDECRYPT(PERSONAL->HEIGHT,0)
+                / 10000.0
+            ) >= 25.0 THEN 'overweight'
+        ELSE 'normal weight'
+    END AS BMI_CATEGORY,
+    K4KDECRYPT(PERSONAL->AGE,0) AS AGE,
+    K4KENCRYPT(
+        K4KDECRYPT(CONTACT,STRUCT(`email`:='',`phone`:=''))->`phone`
+    ) AS PHONE,
+    K4KENCRYPT(
+        TRANSFORM(
+                KNOWNRESIDENCES,
+                e => REPLACE(K4KDECRYPT(e,''),',',' |')
+        )
+        ,array['']
+    ) AS ADDRESSES
+FROM s_fake_citizens
+EMIT CHANGES;

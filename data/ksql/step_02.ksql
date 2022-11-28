@@ -1,0 +1,18 @@
+SET 'auto.offset.reset'='earliest';
+
+-- STEP 02:
+-- decryption in combination with TABLES and GROUP BY operations
+-- to calc age stats per eyecolor of active users
+-- where both fields (age + eyecolor) are encrypted in underlying stream
+-- RUN SCRIPT /home/step_02.ksql;
+CREATE TABLE t_age_stats_active_users_eyecolor AS 
+SELECT 
+    K4KDECRYPT(PERSONAL->EYECOLOR,'') AS EYECOLOR,
+    COUNT(*) AS COUNT,
+    MIN(K4KDECRYPT(PERSONAL->AGE,0)) AS MIN_AGE,
+    MAX(K4KDECRYPT(PERSONAL->AGE,0)) AS MAX_AGE,
+    FLOOR(AVG(K4KDECRYPT(PERSONAL->AGE,0))) AS AVG_AGE
+FROM s_fake_citizens
+WHERE ISACTIVE
+GROUP BY K4KDECRYPT(PERSONAL->EYECOLOR,'')
+EMIT CHANGES;

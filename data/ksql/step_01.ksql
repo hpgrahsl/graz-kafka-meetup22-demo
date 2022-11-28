@@ -1,0 +1,14 @@
+SET 'auto.offset.reset'='earliest';
+
+-- STEP 01:
+-- create base stream from raw data i.e. partially encrypted
+-- Debezium CDC records originating from a MongoDB collection
+-- RUN SCRIPT '/home/step_01.ksql';
+CREATE STREAM s_fake_citizens(
+    _ID VARCHAR,
+    PERSONAL STRUCT<FIRSTNAME VARCHAR, LASTNAME VARCHAR, AGE VARCHAR, EYECOLOR VARCHAR, GENDER VARCHAR, HEIGHT VARCHAR, WEIGHT VARCHAR>,
+    ISACTIVE BOOLEAN,
+    REGISTERED VARCHAR,
+    CONTACT VARCHAR,
+    KNOWNRESIDENCES ARRAY<VARCHAR>
+) WITH (kafka_topic='mongodb.demodb.fake_citizens',value_format='JSON',partitions=1,replicas=1);

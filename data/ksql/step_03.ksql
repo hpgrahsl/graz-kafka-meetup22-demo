@@ -1,0 +1,28 @@
+SET 'auto.offset.reset'='earliest';
+
+-- STEP 03: create derived stream and table
+-- decrypt addresses in knownresidences field
+-- flatten with explode
+-- split address to extract its state part
+-- do group by to count addresses per state
+-- RUN SCRIPT '/home/step_03.ksql';
+CREATE STREAM s_addresses AS
+SELECT 
+    SPLIT(
+        EXPLODE(
+            TRANSFORM(
+                KNOWNRESIDENCES,
+                e => K4KDECRYPT(e,'')
+            )
+        ),
+        ','
+    ) AS ADDRESS_PARTS
+FROM s_fake_citizens 
+EMIT CHANGES;
+
+CREATE TABLE t_address_count_per_state AS 
+SELECT 
+    TRIM(ADDRESS_PARTS[3]) AS STATE,
+    COUNT(*) AS CNT 
+FROM s_addresses
+GROUP BY TRIM(ADDRESS_PARTS[3]);
